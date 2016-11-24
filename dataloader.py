@@ -35,7 +35,7 @@ class DataLoader(object):
     def _init_loader(self, path):
         env = lmdb.open(path, readonly=True)
         self.nimages = env.stat()['entries']
-        print "Load from %s, %d images in total" % (path, self.nimages)
+        print "Load %d images from %s" % (self.nimages, path)
         txn = env.begin()
         return txn
         
