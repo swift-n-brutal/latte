@@ -9,8 +9,9 @@ import numpy as np
 from caffe import check_mode_gpu
 from config import DTYPE
 from blob import Blob
-from math_func import sumsqr, axpby, axpbypcz, seta
-import time
+from math_func import axpby, axpbypcz, sumsqr#, setx
+#import pycuda.gpuarray as garr
+#import time
 
 class MySolver(object):
     def __init__(self, net, test_net=None):
@@ -69,7 +70,8 @@ class SGDSolver(MySolver):
             for l in self.net_blobs:
                 if l is not None:
                     for j in xrange(len(l)):
-                        seta(DTYPE(0), l[j].gpu_diff)
+#                        seta(DTYPE(0), l[j].gpu_diff)
+                        l[j].gpu_diff.fill(DTYPE(0))
         else:
             for l in net.layers:
                 if l.type == "Convolution":
@@ -118,10 +120,10 @@ class SGDSolver(MySolver):
         net_blobs = self.net_blobs
         for i, l in enumerate(net.layers):
             if l.type in ["Convolution", "Scale", "InnerProduct"]:
-                local_lr = lr * sumsqr(net_blobs[i][0].gpu_data)
+                local_lr = lr * (sumsqr(net_blobs[i][0].gpu_data).get())
                 for j in xrange(len(history[i])):
                     axpbypcz(mom, history[i][j].gpu_data,
-                             local_lr, net_blobs[i][j].gpu_diff,
+                             DTYPE(1), net_blobs[i][j].gpu_diff,
                              decay, net_blobs[i][j].gpu_data,
                              history[i][j].gpu_data)
                     axpby(DTYPE(1), net_blobs[i][j].gpu_data,
@@ -136,7 +138,7 @@ class SGDSolver(MySolver):
                 local_lr = lr
                 for j in xrange(len(history[i])):
                     axpbypcz(mom, history[i][j].gpu_data,
-                             local_lr, net_blobs[i][j].gpu_diff,
+                             DTYPE(1), net_blobs[i][j].gpu_diff,
                              decay, net_blobs[i][j].gpu_data,
                              history[i][j].gpu_data)
                     axpby(DTYPE(1), net_blobs[i][j].gpu_data,
@@ -164,6 +166,10 @@ class SGDSolver(MySolver):
     def step(self, lr, mom, decay, dist_type, verbose=False):
         batchid_ = None
 #        stime = time.time()
+        self._clear_diff(self.net)
+#        etime = time.time()
+#        print "clrd %.3f|" % ((etime - stime)*100),
+#        stime = etime
         self.net.load_data(batchid_)
 #        etime = time.time()
 #        print "data %.3f|" % ((etime - stime)*100),
@@ -171,10 +177,6 @@ class SGDSolver(MySolver):
         output_fw_ = self.net.forward()
 #        etime = time.time()
 #        print "forw %.3f|" % ((etime - stime)*100),
-#        stime = etime
-        self._clear_diff(self.net)
-#        etime = time.time()
-#        print "clrd %.3f|" % ((etime - stime)*100),
 #        stime = etime
         output_bw_ = self.net.backward()
 #        etime = time.time()
@@ -217,6 +219,28 @@ class SGDSolver(MySolver):
         loss /= (datasize_ / batchsize_)
         top1 /= (datasize_ / batchsize_)
         return loss, top1
-        
+    
+#    def init_blobs_act(self, net, copy=True):
+#        act = list()
+#        for i, l in enumerate(net.layers):
+#            if l.type == "ReLU":
+#                blob_ids = net._top_ids(i)
+#                blob_name = net._blob_names[blob_ids[0]]
+#                act.append(Blob(net.blobs[blob_name], copy=copy))
+#        return act
+#    
+#    def copy_blobs_act_gpu(self, blobs0, blobs1):
+#        '''
+#            blobs1[i].gpu_data = blobs0[i].gpu_data
+#        '''
+#        for b0,b1 in zip(blobs0, blobs1):
+#            setx(b0.gpu_data, b1.gpu_data)
+#        
+#    def get_trans_gpu(self, blob0, blob1):
+#    #    return garr.dot(blob0.gpu_data, blob1.gpu_data).get()
+##        return sumxorpos(blob0.gpu_data, blob1.gpu_data)
+#        xorpos(blob0.gpu_data, blob1.gpu_data, blob0.gpu_data)
+#        return garr.sum(blob0.gpu_data).get()
+    
     def solve(self):
         pass
