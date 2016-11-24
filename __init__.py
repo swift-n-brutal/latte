@@ -12,7 +12,9 @@ if USE_GPU:
     from .util import get_block_shape, get_grid_shape, set_device, CAFFE_CUDA_CONTEXT
     print "Do not use caffe.set_mode_cpu()/set_mode_gpu()/set_device()"
     print "Use latte.set_device() instead"
+    from . import math_func
 from .solver import SGDSolver
+from .softrelu_solver import SoftReLUSolver
 from .net import MyNet
 from .blob import Blob
 from .dataloader import CifarDataLoader, CifarTransformer
