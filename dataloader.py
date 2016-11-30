@@ -89,42 +89,42 @@ class DataLoader(object):
             dataset['data'] /= meanstd['std']
 
 class CifarDataLoader(DataLoader):
-    def __init__(self, path, net, phase, data_blob='data'):
+    def __init__(self, path, net, phase, data_blob='data', label_blob='label'):
         super(CifarDataLoader, self).__init__()
         self.mean = np.array([125.3, 123.0, 113.9])
         self.std = np.array([63.0, 62.1, 66.7])
         self.key_length = 5
+        self.data_blob = data_blob
+        self.label_blob = label_blob
         if phase == caffe.TRAIN:
-            self.load_dataset(path=path,
-                              transform=True)
+            self.load_dataset(path=path, transform=True)
             self.transformer = CifarTransformer({
                 data_blob: net.blobs[data_blob].data.shape})
             self.transformer.set_pad(data_blob, 4)
             self.transformer.set_mirror(data_blob, True)
         elif phase == caffe.TEST:
-            self.load_dataset(path=path,
-                              transform=True)
+            self.load_dataset(path=path, transform=True)
         else:
             raise Exception("Invalid phase: %s" % str(phase))
         
-    def _load_batch_from_dataset(self, batchid, dest_x, dest_y, data_blob):
+    def _load_batch_from_dataset(self, batchid, dest_data, dest_label):
         if self.transformer is None:
             for i,bid in enumerate(batchid):
-                dest_x[i,...] = self.data[bid,...]
-                if dest_y is not None:
-                    dest_y[i] = self.label[bid]
+                dest_data[i,...] = self.data[bid,...]
         else:
             for i,bid in enumerate(batchid):
-                dest_x[i,...] = self.transformer.process(
-                    data_blob, self.data[bid,...])
-                if dest_y is not None:
-                    dest_y[i] = self.label[bid]
+                dest_data[i,...] = self.transformer.process(
+                    self.data_blob, self.data[bid,...])
+        if dest_label is not None:
+            for i,bid in enumerate(batchid):
+                dest_label[i] = self.label[bid]
         
     def sample_batch(self, batchsize):
         return np.random.randint(self.nimages, size=batchsize)
     
-    def fill_input(self, net, batchid=None,
-                   data_blob='data', label_blob='label'):
+    def fill_input(self, net, batchid=None):
+        data_blob = self.data_blob
+        label_blob = self.label_blob
         batchsize = net.blobs[data_blob].num
         if batchid is None:
             batchid = self.sample_batch(batchsize)
@@ -132,11 +132,10 @@ class CifarDataLoader(DataLoader):
             assert(batchsize == len(batchid))
         if label_blob is not None:
             self._load_batch_from_dataset(batchid, net.blobs[data_blob].data,
-                                          net.blobs[label_blob].data,
-                                          data_blob)
+                                          net.blobs[label_blob].data)
         else:
             self._load_batch_from_dataset(batchid, net.blobs[data_blob].data,
-                                          None, data_blob)
+                                          None)
 
 class CifarTransformer(object):
     def __init__(self, inputs):
@@ -238,7 +237,7 @@ class CifarTransformer(object):
 
     def set_center(self, in_, center):
         self.__check_input(in_)
-        self.center[in_] = center
+        self.center[in_] = center      
 
 if __name__ == '__main__':
     a = np.random.randn(1,2,3,4)

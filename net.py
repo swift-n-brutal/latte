@@ -23,13 +23,11 @@ class MyNet(Net):
         else:
             super(MyNet, self).__init__(deploy, phase)
         self.phase = phase
+        self.dataloader = None
     
-    def set_dataloader(self, dataloader, data_blob='data', label_blob='label'):
+    def set_dataloader(self, dataloader):
         self.dataloader = dataloader
-        self.data_blob = data_blob
-        self.label_blob = label_blob
         
     def load_data(self, batchid=None):
-        self.dataloader.fill_input(net=self, batchid=batchid,
-                                   data_blob=self.data_blob,
-                                   label_blob=self.label_blob)
+        if self.dataloader is not None:
+            self.dataloader.fill_input(net=self, batchid=batchid)
