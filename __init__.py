@@ -15,6 +15,7 @@ if USE_GPU:
     from . import math_func
 from .solver import SGDSolver
 from .softrelu_solver import SoftReLUSolver
+from .newton_solver import NewtonSolver
 from .net import MyNet
 from .blob import Blob
-from .dataloader import CifarDataLoader, CifarTransformer
+from .dataloader import CifarDataLoader, CifarTransformer, CifarDataLoaderMultiThreading
