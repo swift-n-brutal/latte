@@ -4,10 +4,12 @@ Created on Wed Nov 09 17:25:55 2016
 
 @author: shiwu_001
 """
-
+from .config import DTYPE
 import caffe
 import numpy as np
 import lmdb
+from threading import Thread
+from Queue import Queue
 
 class DataLoader(object):
     def __init__(self):
@@ -96,6 +98,7 @@ class CifarDataLoader(DataLoader):
         self.key_length = 5
         self.data_blob = data_blob
         self.label_blob = label_blob
+#        self.batchsize = net.blobs[data_blob].num
         if phase == caffe.TRAIN:
             self.load_dataset(path=path, transform=True)
             self.transformer = CifarTransformer({
@@ -125,7 +128,7 @@ class CifarDataLoader(DataLoader):
     def fill_input(self, net, batchid=None):
         data_blob = self.data_blob
         label_blob = self.label_blob
-        batchsize = net.blobs[data_blob].num
+        batchsize = net.blobs[self.data_blob].num
         if batchid is None:
             batchid = self.sample_batch(batchsize)
         else:
@@ -154,7 +157,7 @@ class CifarTransformer(object):
     
     def process(self, in_, data):
         self.__check_input(in_)
-        data_in = np.copy(data).astype(np.float32)
+        data_in = np.copy(data).astype(DTYPE)
         mean = self.mean.get(in_)
         std = self.std.get(in_)
         pad = self.pad.get(in_)
@@ -239,6 +242,118 @@ class CifarTransformer(object):
         self.__check_input(in_)
         self.center[in_] = center      
 
-if __name__ == '__main__':
-    a = np.random.randn(1,2,3,4)
-    tf = CifarTransformer({'data': a.shape})
+class CifarDataLoaderThread(Thread):
+    def __init__(self, tid, queue, buffer_out, data, label,
+                 data_blob, label_blob, data_blob_shape, transformer):
+        super(CifarDataLoaderThread, self).__init__()
+        self.tid = tid
+        self.queue = queue
+        self.buffer_out = buffer_out
+        self.data = data
+        self.label = label
+        self.data_blob = data_blob
+        self.label_blob = label_blob
+        self.data_blob_shape = data_blob_shape
+        self.transformer = transformer
+        
+    def run(self):
+        if self.transformer is not None:
+            ndata = self.data.shape[0]
+            data_processed = np.zeros(self.data_blob_shape)
+            for i in xrange(ndata):
+                data_processed[i, ...] = self.transformer.process(self.data_blob, self.data[i, ...])
+            self.buffer_out[self.data_blob][...] = data_processed
+        else:
+            self.buffer_out[self.data_blob][...] = self.data
+        if self.label_blob is not None:
+            self.buffer_out[self.label_blob][...] = self.label
+        self.queue.put(self.tid)
+
+class CifarDataLoaderMultiThreading(CifarDataLoader):
+    def __init__(self, nthreads, *args, **kwargs):
+        super(CifarDataLoaderMultiThreading, self).__init__(*args, **kwargs)
+        self.nthreads = nthreads
+        self.thread_list = None
+        self.buffers = None
+        self.queue = Queue()
+        
+    def _start_load_batch_from_dataset(self, tid, data_blob_shape):
+        batchid = self.sample_batch(data_blob_shape[0])
+        td = CifarDataLoaderThread(tid, self.queue, self.buffers[tid],
+                                   self.data[batchid, ...], self.label[batchid],
+                                   self.data_blob, self.label_blob,
+                                   data_blob_shape, self.transformer)
+        td.start()
+        self.thread_list[tid] = td
+        
+    def _join_load_batch_from_dataset(self, tid):
+        self.thread_list[tid].join()
+    
+    def _init_load_batch_from_dataset(self, net):
+        self.thread_list = range(self.nthreads)
+        self.buffers = []
+        for tid in xrange(self.nthreads):
+            self.buffers.append(dict())
+            self.buffers[-1][self.data_blob] = np.zeros_like(net.blobs[self.data_blob].data)
+            if self.label_blob is not None:
+                self.buffers[-1][self.label_blob] = np.zeros_like(net.blobs[self.label_blob].data)
+        for tid in xrange(self.nthreads):
+            self._start_load_batch_from_dataset(tid, net.blobs[self.data_blob].data.shape)
+
+    def _fill_input_from_buffers(self, net):
+        if self.thread_list is None:
+            self._init_load_batch_from_dataset(net)
+            print "Init %d dataloader threads" % self.nthreads
+        tid = self.queue.get()
+        self._join_load_batch_from_dataset(tid)
+        net.blobs[self.data_blob].data[...] = self.buffers[tid][self.data_blob]
+        if self.label_blob is not None:
+            net.blobs[self.label_blob].data[...] = self.buffers[tid][self.label_blob]
+        self._start_load_batch_from_dataset(tid, net.blobs[self.data_blob].data.shape)
+    
+    def fill_input(self, net, batchid=None):
+        if batchid is None:
+            self._fill_input_from_buffers(net)
+        else:
+            if self.label_blob is not None:
+                self._load_batch_from_dataset(batchid, net.blobs[self.data_blob].data,
+                                              net.blobs[self.label_blob].data)
+            else:
+                self._load_batch_from_dataset(batchid, net.blobs[self.data_blob].data,
+                                              None)
+    
+#    def __del__(self):
+#        if self.thread_list is not None:
+#            for tid in xrange(self.nthreads):
+#                if type(self.thread_list[tid]) is CifarDataLoaderThread:
+#                    self.thread_list[tid].terminate()
+
+#if __name__ == '__main__':
+#    import sys
+#    sys.path.insert(0, '..')
+#    from latte.config import CAFFE_ROOT
+#    from latte.net import MyNet
+#    import os.path as osp
+#    import sys
+#    import time
+#    nthrd = int(sys.argv[1])
+#    deploy = osp.join(CAFFE_ROOT, "examples", "cifar10", "resnet20_cifar10_1st_deploy.prototxt")
+#    model = None
+#    data_blob = "data"
+#    label_blob = "label"
+#    net = MyNet(deploy, model, pretrained=(model!=None))
+#    dataset = CifarDataLoaderMultiThreading(nthrd, osp.join(CAFFE_ROOT, 'examples', 'cifar10/cifar10_train_lmdb'),
+#                                    net, phase=caffe.TRAIN,
+#                                    data_blob=data_blob, label_blob=label_blob)
+#    ######################################################
+##    dataset.transformer.set_mirror(data_blob, False)
+#    ######################################################
+#    net.set_dataloader(dataset)
+#    start_time = time.time()
+#    for i in xrange(51):
+#        net.load_data(None)
+#        time.sleep(1)
+#        if i % 10 == 0:
+#            end_time = time.time()
+#            print i, "%.3f" % (end_time - start_time)
+#            start_time = end_time
