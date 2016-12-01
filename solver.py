@@ -204,7 +204,7 @@ class SGDSolver(MySolver):
     
     def test(self):
         net = self.test_net
-        batchsize_ = net.blobs[net.data_blob].num
+        batchsize_ = net.blobs[net.dataloader.data_blob].num
         datasize_ = net.dataloader.nimages
         assert(datasize_ % batchsize_ == 0)
         loss = 0.
